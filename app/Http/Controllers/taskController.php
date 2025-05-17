@@ -9,6 +9,25 @@ class taskController extends Controller
 {
     public function index()
     {
+        // Apply filters from the request if present
+        $query = Task::query();
+
+        if (request()->has('status') && request()->status) {
+            $query->where('status', request()->status);
+        }
+        if (request()->has('priority') && request()->priority) {
+            $query->where('priority', request()->priority);
+        }
+        if (request()->has('search') && request()->search) {
+            $search = request()->search;
+            $query->where(function($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            });
+        }
+
+        $tasks = $query->get();
+        return view('tasks.index')->with('tasks', $tasks);
         // Fetch all tasks from the database
         $tasks = Task::pending()->get();
         return view('tasks.index')->with('tasks', $tasks);
