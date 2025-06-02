@@ -7,19 +7,21 @@ use App\Models\Task;
 
 class taskController extends Controller
 {
-    public function index()
+    // Display a listing of the tasks with filters and only for the authenticated user
+    public function index(Request $request)
     {
-        // Apply filters from the request if present
-        $query = Task::query();
+        $userId = auth()->id();
 
-        if (request()->has('status') && request()->status) {
-            $query->where('status', request()->status);
+        $query = Task::where('user_id', $userId);
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
         }
-        if (request()->has('priority') && request()->priority) {
-            $query->where('priority', request()->priority);
+        if ($request->filled('priority')) {
+            $query->where('priority', $request->priority);
         }
-        if (request()->has('search') && request()->search) {
-            $search = request()->search;
+        if ($request->filled('search')) {
+            $search = $request->search;
             $query->where(function($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhere('description', 'like', "%{$search}%");
@@ -27,10 +29,7 @@ class taskController extends Controller
         }
 
         $tasks = $query->get();
-        return view('tasks.index')->with('tasks', $tasks);
-        // Fetch all tasks from the database
-        $tasks = Task::pending()->get();
-        return view('tasks.index')->with('tasks', $tasks);
+        return view('tasks.index', compact('tasks'));
     }
 
     public function create()
@@ -40,31 +39,31 @@ class taskController extends Controller
 
     public function store(Request $request)
     {
-        // Validate the incoming request data
         $validatedData = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'priority' => 'required|in:low,medium,high',
             'due_date' => 'nullable|date|after_or_equal:today',
+            'user_id' => 'nullable|exists:users,id', // Optional, if you want to set a specific user
         ]);
 
-        // Create a new task using the validated data
-        $task = Task::create($validatedData);
+        $validatedData['user_id'] = auth()->id();
 
-        // Redirect to the task list with a success message
+        Task::create($validatedData);
+
         return redirect()->route('tasks.index')->with('success', 'Task created successfully!');
     }
 
     public function show($id)
     {
-        $task = Task::findOrFail($id);
-        return view('tasks.show')->with('task', $task);
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
+        return view('tasks.show', compact('task'));
     }
 
     public function edit($id)
     {
-        $task = Task::findOrFail($id);
-        return view('tasks.edit')->with('task', $task);
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
+        return view('tasks.edit', compact('task'));
     }
 
     public function update(Request $request, $id)
@@ -76,159 +75,221 @@ class taskController extends Controller
             'due_date' => 'nullable|date|after_or_equal:today',
             'status' => 'required|in:pending,in_progress,completed',
         ]);
-        // Find the task by ID and update it with the validated data
-        $task = Task::findOrFail($id);
+
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
         $task->update($validatedData);
-        // Redirect to the task list with a success message
+
         return redirect()->route('tasks.index')->with('success', 'Task updated successfully!');
     }
 
     public function destroy($id)
     {
-        // Find the task by ID and delete it
-        $task = Task::findOrFail($id);
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
         $task->delete();
-        // Redirect to the task list with a success message
+
         return redirect()->route('tasks.index')->with('success', 'Task deleted successfully!');
     }
+
     public function filter(Request $request)
     {
-        return view('tasks.index', [
-            'tasks' => Task::query()
-                ->when($request->search, fn($query) => $query->where('name', 'like', "%{$request->search}%"))
-                ->when($request->priority, fn($query) => $query->where('priority', $request->priority))
-                ->when($request->status, fn($query) => $query->where('status', $request->status))
-                ->get(),
-        ]);
+        $userId = auth()->id();
+        $tasks = Task::where('user_id', $userId)
+            ->when($request->search, fn($query) => $query->where('name', 'like', "%{$request->search}%"))
+            ->when($request->priority, fn($query) => $query->where('priority', $request->priority))
+            ->when($request->status, fn($query) => $query->where('status', $request->status))
+            ->get();
+
+        return view('tasks.index', compact('tasks'));
     }
+
     public function search(Request $request)
     {
-        // Search tasks by name or description
-        // Return the search results
+        $userId = auth()->id();
+        $search = $request->input('search');
+        $tasks = Task::where('user_id', $userId)
+            ->where(function($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('description', 'like', "%{$search}%");
+            })
+            ->get();
+
+        return view('tasks.index', compact('tasks'));
     }
-    public function export(Request $request)
-    {
-        // Export tasks to CSV or Excel
-        // Return the exported file
-    }
-    public function import(Request $request)
-    {
-        // Import tasks from CSV or Excel
-        // Redirect to the task list with success or error message
-    }
+
+    // The following methods are updated to filter by authenticated user
+
     public function markAsCompleted($id)
     {
-        // Mark a task as completed
-        // Redirect to the task list
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
+        $task->update(['status' => 'completed']);
+        return redirect()->route('tasks.index')->with('success', 'Task marked as completed!');
     }
+
     public function markAsInProgress($id)
     {
-        // Mark a task as in progress
-        // Redirect to the task list
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
+        $task->update(['status' => 'in_progress']);
+        return redirect()->route('tasks.index')->with('success', 'Task marked as in progress!');
     }
+
     public function markAsPending($id)
     {
-        // Mark a task as pending
-        // Redirect to the task list
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
+        $task->update(['status' => 'pending']);
+        return redirect()->route('tasks.index')->with('success', 'Task marked as pending!');
     }
+
     public function setPriority($id, $priority)
     {
-        // Set the priority of a task
-        // Redirect to the task list
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
+        $task->update(['priority' => $priority]);
+        return redirect()->route('tasks.index')->with('success', 'Task priority updated!');
     }
+
     public function setDueDate($id, $due_date)
     {
-        // Set the due date of a task
-        // Redirect to the task list
+        $task = Task::where('user_id', auth()->id())->findOrFail($id);
+        $task->update(['due_date' => $due_date]);
+        return redirect()->route('tasks.index')->with('success', 'Task due date updated!');
     }
+
     public function clearCompleted()
     {
-        // Clear all completed tasks
-        // Redirect to the task list
+        Task::where('user_id', auth()->id())->where('status', 'completed')->delete();
+        return redirect()->route('tasks.index')->with('success', 'All completed tasks cleared!');
     }
+
     public function clearOverdue()
     {
-        // Clear all overdue tasks
-        // Redirect to the task list
+        Task::where('user_id', auth()->id())->where('due_date', '<', now())->delete();
+        return redirect()->route('tasks.index')->with('success', 'All overdue tasks cleared!');
     }
+
     public function clearAll()
     {
-        // Clear all tasks
-        // Redirect to the task list
+        Task::where('user_id', auth()->id())->delete();
+        return redirect()->route('tasks.index')->with('success', 'All tasks cleared!');
     }
+
     public function showCompleted()
     {
-        // Show only completed tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())->where('status', 'completed')->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showPending()
     {
-        // Show only pending tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())->where('status', 'pending')->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showInProgress()
     {
-        // Show only in-progress tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())->where('status', 'in_progress')->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showHighPriority()
     {
-        // Show only high-priority tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())->where('priority', 'high')->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showMediumPriority()
     {
-        // Show only medium-priority tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())->where('priority', 'medium')->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showLowPriority()
     {
-        // Show only low-priority tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())->where('priority', 'low')->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showDueToday()
     {
-        // Show only tasks due today
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())
+            ->whereDate('due_date', now()->toDateString())
+            ->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showDueTomorrow()
     {
-        // Show only tasks due tomorrow
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())
+            ->whereDate('due_date', now()->addDay()->toDateString())
+            ->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showDueThisWeek()
     {
-        // Show only tasks due this week
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())
+            ->whereBetween('due_date', [now()->startOfWeek(), now()->endOfWeek()])
+            ->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showDueNextWeek()
     {
-        // Show only tasks due next week
-        // Return the task list
+        $start = now()->addWeek()->startOfWeek();
+        $end = now()->addWeek()->endOfWeek();
+        $tasks = Task::where('user_id', auth()->id())
+            ->whereBetween('due_date', [$start, $end])
+            ->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showOverdue()
     {
-        // Show only overdue tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())
+            ->where('due_date', '<', now())
+            ->where('status', '!=', 'completed')
+            ->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showAll()
     {
-        // Show all tasks
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showByDate($date)
     {
-        // Show tasks by specific date
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())
+            ->whereDate('due_date', $date)
+            ->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showByMonth($month)
     {
-        // Show tasks by specific month
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())
+            ->whereMonth('due_date', $month)
+            ->get();
+        return view('tasks.index', compact('tasks'));
     }
+
     public function showByYear($year)
     {
-        // Show tasks by specific year
-        // Return the task list
+        $tasks = Task::where('user_id', auth()->id())
+            ->whereYear('due_date', $year)
+            ->get();
+        return view('tasks.index', compact('tasks'));
+    }
+
+    // You may implement export/import as needed, but always filter by user_id
+    public function export(Request $request)
+    {
+        // Export tasks to CSV or Excel for the authenticated user
+        // Implement as needed
+    }
+
+    public function import(Request $request)
+    {
+        // Import tasks from CSV or Excel for the authenticated user
+        // Implement as needed
     }
 }
